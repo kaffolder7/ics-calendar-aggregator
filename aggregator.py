@@ -17,7 +17,6 @@ import hashlib
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
 OUTPUT_ICS = "merged_calendar.ics"
 DB_FILE = "calendar_cache.db"
-# DB_FILE = "calendar_cache.sqlite"
 CACHE_DURATION_HOURS = 6
 
 class CalendarAggregator:
@@ -37,7 +36,8 @@ class CalendarAggregator:
                 uid TEXT PRIMARY KEY,
                 url TEXT,
                 last_updated TIMESTAMP,
-                ics_hash TEXT
+                ics_hash TEXT,
+                description TEXT
             )
         ''')
         self.conn.commit()
@@ -61,6 +61,7 @@ class CalendarAggregator:
             # '.eventlist-event a',
             # '.event-item a',
             # 'article a[href*="event"]'
+
             # '.eventlist-event a.eventlist-title-link[href*="/events/"]',
             '.eventlist-event--upcoming a.eventlist-title-link[href*="/events/"]',
         ]
@@ -80,6 +81,48 @@ class CalendarAggregator:
         print(f"Found {len(event_links)} event links")
         return event_links
     
+    def get_event_description(self, event_url):
+        """Scrape event description from the event page"""
+        try:
+            print(f"  Fetching description from page...")
+            response = self.session.get(event_url, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Try multiple selectors for description
+            selectors = [
+                # '.eventlist-description',
+                # '.sqs-block-html',  # (common Squarespace content block)
+                '.eventitem-column-content',
+                # '.event-description',
+                # 'article .body-text'
+            ]
+            
+            description_text = None
+            
+            for selector in selectors:
+                desc_element = soup.select_one(selector)
+                if desc_element:
+                    # Get text and clean it up
+                    description_text = desc_element.get_text(separator='\n', strip=True)
+                    
+                    # Remove excessive whitespace (this preserves paragraph breaks, removes HTML tags, eliminates extra blank lines, and makes it readable in calendar apps)
+                    lines = [line.strip() for line in description_text.split('\n') if line.strip()]
+                    description_text = '\n\n'.join(lines)
+                    
+                    print(f"  ✓ Found description ({len(description_text)} chars)")
+                    break
+            
+            if not description_text:
+                print(f"  ⚠ No description found on page")
+            
+            return description_text
+            
+        except Exception as e:
+            print(f"  ✗ Failed to fetch description: {e}")
+            return None
+    
     def download_ics(self, event_url):
         """Download .ics file for a specific event"""
         # Try common ICS URL patterns
@@ -87,6 +130,7 @@ class CalendarAggregator:
             # f"{event_url}?format=ics",
             # f"{event_url.rstrip('/')}.ics",
             # event_url.replace('/events/', '/events/').rstrip('/') + '?format=ics',
+
             f"{event_url}?format=ical",
             event_url.replace('/events/', '/events/').rstrip('/') + '?format=ical',
         ]
@@ -162,6 +206,9 @@ class CalendarAggregator:
         
         for event_url in event_urls:
             print(f"\nProcessing: {event_url}")
+
+            # Scrape event description from the page first
+            scraped_description = self.get_event_description(event_url)
             
             # Download ICS
             ics_content = self.download_ics(event_url)
@@ -177,6 +224,23 @@ class CalendarAggregator:
             
             for event in events:
                 uid = str(event.get('uid', ''))
+
+                # Add or update description from scraped content
+                if scraped_description:
+                    # Check if there's already a description in the ICS
+                    existing_desc = event.get('description', '')
+                    
+                    if existing_desc:
+                        # Append scraped description to existing
+                        combined_desc = f"{existing_desc}\n\n---\n\n{scraped_description}"
+                        event['description'] = combined_desc
+                    else:
+                        # Use scraped description
+                        event['description'] = scraped_description
+                    
+                    # Also add the event URL to the description for reference
+                    if event_url:
+                        event['description'] = f"{event.get('description', '')}\n\nEvent URL: {event_url}"
                 
                 # Check if we should update this event
                 if not self.should_update_event(uid, ics_hash):
