@@ -229,6 +229,10 @@ class CalendarAggregator:
             for event in events:
                 uid = str(event.get('uid', ''))
 
+                # Set the event page URL as the VEVENT URL property
+                if event_url:
+                    event['url'] = event_url
+
                 # Add or update description from scraped content
                 if scraped_description:
                     # Check if there's already a description in the ICS
@@ -241,10 +245,6 @@ class CalendarAggregator:
                     else:
                         # Use scraped description
                         event['description'] = scraped_description
-                    
-                    # Also add the event URL to the description for reference
-                    if event_url:
-                        event['description'] = f"{event.get('description', '')}\n\nEvent URL: {event_url}"
                 
                 # Check if we should update this event
                 if not self.should_update_event(uid, ics_hash):
