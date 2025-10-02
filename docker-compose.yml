@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  calendar-aggregator:
+  aggregator:
     build: .
-    container_name: noblesville-calendar
+    container_name: noblesville-calendar-aggregator
     restart: unless-stopped
     ports:
       - "8080:8080"

@@ -3,20 +3,21 @@ version: '3.8'
 services:
   aggregator:
     build: .
-    container_name: calendar-aggregator
+    container_name: noblesville-calendar-aggregator
     restart: unless-stopped
     volumes:
       - calendar-data:/app/output
       - ./calendar_cache.db:/app/calendar_cache.db
     environment:
       - EVENTS_URL=https://www.noblesvillemainstreet.org/events
-    command: sh -c "while true; do python aggregator.py && sleep 3600; done"  # 1 hour (default)
-    # command: sh -c "while true; do python aggregator.py && sleep 1800; done"  # 30 minutes
-    # command: sh -c "while true; do python aggregator.py && sleep 21600; done"  # 6 hours
+      - UPDATE_INTERVAL=3600  # 1 hour in seconds
+      # - UPDATE_INTERVAL=1800  # 30 minutes in seconds
+      # - UPDATE_INTERVAL=21600  # 6 hours in seconds
+      - USE_NGINX=true
 
   nginx:
     image: nginx:alpine
-    container_name: calendar-nginx
+    container_name: noblesville-calendar-nginx
     restart: unless-stopped
     ports:
       - "8080:80"

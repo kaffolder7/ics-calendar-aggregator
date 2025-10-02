@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -7,10 +7,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
-COPY aggregator.py .
+# COPY aggregator.py .
+# COPY aggregator_threaded.py aggregator.py
+COPY aggregator_threaded_rate-limited.py aggregator.py
 
 # Create output directory
 RUN mkdir -p /app/output
 
-# Run aggregator periodically and serve via simple HTTP
-CMD ["sh", "-c", "while true; do python aggregator.py && sleep 3600; done & python -m http.server 8080 --directory /app"]
+# Set a default value for UPDATE_INTERVAL (can be overridden at runtime)
+ENV UPDATE_INTERVAL=3600
+ENV USE_NGINX=false
+
+# Create an entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
