@@ -12,6 +12,9 @@ import sqlite3
 import os
 from pathlib import Path
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from threading import Lock
 
 # Configuration
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
@@ -39,6 +42,9 @@ class CalendarAggregator:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
 
         self.init_database()
+        self.request_lock = Lock()
+        self.last_request_time = 0
+        self.min_delay = 0.2  # 200ms between requests
     
     def init_database(self):
         """Initialize SQLite database for tracking processed events"""
@@ -69,13 +75,7 @@ class CalendarAggregator:
         
         # Try multiple selectors
         selectors = [
-            # 'a[href*="/events-calendar/"]',
-            # 'a[href*="/events/"]',
-            # '.eventlist-event a',
-            # '.event-item a',
-            # 'article a[href*="event"]'
-
-            # '.eventlist-event a.eventlist-title-link[href*="/events/"]',
+            'a[href*="/events-calendar/"]',
             '.eventlist-event--upcoming a.eventlist-title-link[href*="/events/"]',
         ]
         
@@ -93,27 +93,33 @@ class CalendarAggregator:
         
         print(f"Found {len(event_links)} event links")
         return event_links
+
+    def rate_limited_get(self, url, **kwargs):
+        """Make HTTP request with rate limiting"""
+        with self.request_lock:
+            # Ensure minimum delay between requests
+            elapsed = time.time() - self.last_request_time
+            if elapsed < self.min_delay:
+                time.sleep(self.min_delay - elapsed)
+            
+            response = self.session.get(url, **kwargs)
+            self.last_request_time = time.time()
+            return response
     
     def get_event_description(self, event_url):
         """Scrape event description from the event page"""
         try:
             print(f"  Fetching description from page...")
-            response = self.session.get(event_url, timeout=10)
+            response = self.rate_limited_get(event_url, timeout=10)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # Try multiple selectors for description
             selectors = [
-                # '.eventlist-description',
-                # '.sqs-block-html',  # (common Squarespace content block)
+                '.eventlist-description',
+                '.sqs-block-html',  # (common Squarespace content block)
                 '.eventitem-column-content',
-                # '.event-description',
-                # 'article .body-text'
-
-                # '.event-details',
-                # '[data-description]',
-                # '.main-content .text-block',
             ]
             
             description_text = None
@@ -144,12 +150,9 @@ class CalendarAggregator:
         """Download .ics file for a specific event"""
         # Try common ICS URL patterns
         ics_urls = [
-            # f"{event_url}?format=ics",
-            # f"{event_url.rstrip('/')}.ics",
-            # event_url.replace('/events/', '/events/').rstrip('/') + '?format=ics',
-
+            f"{event_url}?format=ics",
             f"{event_url}?format=ical",
-            event_url.replace('/events/', '/events/').rstrip('/') + '?format=ical',
+            f"{event_url.rstrip('/')}.ics",
         ]
         
         for ics_url in ics_urls:
@@ -206,6 +209,94 @@ class CalendarAggregator:
         
         return False
     
+    def is_future_event(self, event):
+        """Check if event starts today or in the future"""
+        try:
+            dtstart = event.get('dtstart')
+            if not dtstart:
+                return True  # Include events without dates (rare case)
+            
+            # Get the datetime value
+            event_date = dtstart.dt
+            
+            # Handle both date and datetime objects
+            if isinstance(event_date, datetime):
+                event_datetime = event_date
+            else:
+                # It's a date object, convert to datetime at start of day
+                event_datetime = datetime.combine(event_date, datetime.min.time())
+            
+            # Make timezone-aware if needed
+            if event_datetime.tzinfo is None:
+                event_datetime = event_datetime.replace(tzinfo=None)
+            
+            # Get today at midnight (start of day)
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Compare - include if event is today or later
+            return event_datetime >= today
+        
+
+            
+        except Exception as e:
+            print(f"    Warning: Could not parse date for event, including it anyway: {e}")
+            return True  # Include by default if we can't determine the date
+    
+    def process_single_event(self, event_url):
+        """Process a single event: scrape description, download ICS, parse, and return event data"""
+        try:
+            print(f"\n[Thread] Processing: {event_url}")
+            
+            # Scrape event description from the page first
+            scraped_description = self.get_event_description(event_url)
+            
+            # Download ICS
+            ics_content = self.download_ics(event_url)
+            if not ics_content:
+                print(f"[Thread] ✗ Could not download ICS for {event_url}")
+                return None
+            
+            # Calculate hash for change detection
+            ics_hash = hashlib.md5(ics_content.encode()).hexdigest()
+            
+            # Parse events
+            events = self.parse_ics(ics_content)
+            
+            processed_events = []
+            
+            for event in events:
+                uid = str(event.get('uid', ''))
+
+                # Set the event page URL as the VEVENT URL property
+                if event_url:
+                    event['url'] = event_url
+                
+                # Add or update description from scraped content
+                if scraped_description:
+                    # Check if there's already a description in the ICS
+                    existing_desc = event.get('description', '')
+                    
+                    if existing_desc:
+                        # Append scraped description to existing
+                        combined_desc = f"{existing_desc}\n\n---\n\n{scraped_description}"
+                        event['description'] = combined_desc
+                    else:
+                        # Use scraped description
+                        event['description'] = scraped_description
+                
+                processed_events.append({
+                    'event': event,
+                    'uid': uid,
+                    'url': event_url,
+                    'ics_hash': ics_hash
+                })
+            
+            return processed_events
+            
+        except Exception as e:
+            print(f"[Thread] ✗ Error processing {event_url}: {e}")
+            return None
+    
     def merge_calendars(self):
         """Main function to aggregate all calendars"""
         # Create new calendar
@@ -220,67 +311,62 @@ class CalendarAggregator:
         
         events_added = 0
         events_skipped = 0
-        
-        for event_url in event_urls:
-            print(f"\nProcessing: {event_url}")
 
-            # Scrape event description from the page first
-            scraped_description = self.get_event_description(event_url)
-            
-            # Download ICS
-            ics_content = self.download_ics(event_url)
-            if not ics_content:
-                print("  ✗ Could not download ICS")
-                continue
-            
-            # Calculate hash for change detection
-            ics_hash = hashlib.md5(ics_content.encode()).hexdigest()
-            
-            # Parse events
-            events = self.parse_ics(ics_content)
-            
-            for event in events:
-                uid = str(event.get('uid', ''))
+        # Dynamic worker count based on number of events
+        MAX_WORKERS = min(5, len(event_urls))  # Max 5 workers, but not more than events
 
-                # Set the event page URL as the VEVENT URL property
-                if event_url:
-                    event['url'] = event_url
+        print(f"\n{'='*50}")
+        print(f"Processing {len(event_urls)} events with {MAX_WORKERS} parallel workers...")
+        print(f"{'='*50}")
 
-                # Add or update description from scraped content
-                if scraped_description:
-                    # Check if there's already a description in the ICS
-                    existing_desc = event.get('description', '')
+        # Process events in parallel
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all tasks
+            future_to_url = {
+                executor.submit(self.process_single_event, url): url 
+                for url in event_urls
+            }
+            
+            # Process completed tasks as they finish
+            for future in as_completed(future_to_url):
+                event_url = future_to_url[future]
+                
+                try:
+                    result = future.result()
                     
-                    if existing_desc:
-                        # Append scraped description to existing
-                        combined_desc = f"{existing_desc}\n\n---\n\n{scraped_description}"
-                        event['description'] = combined_desc
-                    else:
-                        # Use scraped description
-                        event['description'] = scraped_description
-                
-                # Check if we should update this event
-                if not self.should_update_event(uid, ics_hash):
-                    print(f"  ↷ Skipped (cached): {event.get('summary', 'Untitled')}")
-                    events_skipped += 1
+                    if result is None:
+                        continue
                     
-                    # Still add to merged calendar (load from cache or re-add)
-                    merged_cal.add_component(event)
-                    continue
+                    # Process each event from this URL
+                    for event_data in result:
+                        event = event_data['event']
+                        uid = event_data['uid']
+                        ics_hash = event_data['ics_hash']
+                        
+                        # Check if we should update this event
+                        if not self.should_update_event(uid, ics_hash):
+                            print(f"[Main] ↷ Skipped (cached): {event.get('summary', 'Untitled')}")
+                            events_skipped += 1
+                            merged_cal.add_component(event)
+                            continue
+                        
+                        # Add event to merged calendar
+                        merged_cal.add_component(event)
+                        events_added += 1
+                        
+                        # Use connection lock for thread safety
+                        with self.request_lock:
+                            # Update database (thread-safe with SQLite's default settings)
+                            self.cursor.execute('''
+                                INSERT OR REPLACE INTO events (uid, url, last_updated, ics_hash)
+                                VALUES (?, ?, ?, ?)
+                            ''', (uid, event_url, datetime.now().isoformat(), ics_hash))
+                            self.conn.commit()
+                        
+                        print(f"[Main] ✓ Added: {event.get('summary', 'Untitled')}")
                 
-                # Add event to merged calendar
-                merged_cal.add_component(event)
-                events_added += 1
-                
-                # Update database
-                self.cursor.execute('''
-                    INSERT OR REPLACE INTO events (uid, url, last_updated, ics_hash)
-                    VALUES (?, ?, ?, ?)
-                ''', (uid, event_url, datetime.now().isoformat(), ics_hash))
-                
-                print(f"  ✓ Added: {event.get('summary', 'Untitled')}")
-        
-        self.conn.commit()
+                except Exception as e:
+                    print(f"[Main] ✗ Error processing result for {event_url}: {e}")
         
         # Write merged calendar
         with open(OUTPUT_ICS, 'wb') as f:

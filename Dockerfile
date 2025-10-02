@@ -7,9 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
-# COPY aggregator.py .
-# COPY aggregator_threaded.py aggregator.py
-COPY aggregator_threaded_rate-limited.py aggregator.py
+COPY aggregator.py .
 
 # Create output directory
 RUN mkdir -p /app/output
