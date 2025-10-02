@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from threading import Lock
 
 # Configuration
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
@@ -30,6 +32,9 @@ class CalendarAggregator:
             'User-Agent': 'Mozilla/5.0 (compatible; CalendarAggregator/1.0)'
         })
         self.init_database()
+        self.request_lock = Lock()
+        self.last_request_time = 0
+        self.min_delay = 0.2  # 200ms between requests
     
     def init_database(self):
         """Initialize SQLite database for tracking processed events"""
@@ -85,11 +90,23 @@ class CalendarAggregator:
         print(f"Found {len(event_links)} event links")
         return event_links
 
+    def rate_limited_get(self, url, **kwargs):
+        """Make HTTP request with rate limiting"""
+        with self.request_lock:
+            # Ensure minimum delay between requests
+            elapsed = time.time() - self.last_request_time
+            if elapsed < self.min_delay:
+                time.sleep(self.min_delay - elapsed)
+            
+            response = self.session.get(url, **kwargs)
+            self.last_request_time = time.time()
+            return response
+    
     def get_event_description(self, event_url):
         """Scrape event description from the event page"""
         try:
             print(f"  Fetching description from page...")
-            response = self.session.get(event_url, timeout=10)
+            response = self.rate_limited_get(event_url, timeout=10)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.content, 'html.parser')
