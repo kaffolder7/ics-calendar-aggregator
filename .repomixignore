@@ -2,4 +2,6 @@
 .repomixignore
 aggregator_threaded.py
 aggregator.py
+LICENSE
+README.md
 repomix.config.json
