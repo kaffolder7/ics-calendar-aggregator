@@ -97,6 +97,10 @@ class CalendarAggregator:
                 '.eventitem-column-content',
                 # '.event-description',
                 # 'article .body-text'
+
+                # '.event-details',
+                # '[data-description]',
+                # '.main-content .text-block',
             ]
             
             description_text = None
