@@ -39,7 +39,7 @@ jobs:
       - name: Run basic validation
         run: |
           # Validate Python syntax
-          python -m py_compile aggregator_threaded_rate-limited.py
+          python -m py_compile aggregator.py
           
           # Check imports
           python -c "import requests; import bs4; import icalendar; print('Dependencies OK')"

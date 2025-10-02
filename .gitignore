@@ -1,8 +1,22 @@
-# SQLite database
-*.db
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
 
-# Generated .ics
-*.ics
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
 
 # Environments
 .env
@@ -14,8 +28,15 @@ ENV/
 env.bak/
 venv.bak/
 
+# Other
 .DS_Store
 *.backup*
+
+# SQLite database
+*.db
+
+# Generated .ics
+*.ics
 
 # Repomix
 repomix-output.*

@@ -7,10 +7,12 @@ A Python service that scrapes event pages, downloads individual `.ics` calendar 
 - 🔄 **Automatic Aggregation** - Scrapes event listings and downloads ICS files
 - 📝 **Description Enrichment** - Extracts event descriptions from web pages<!-- - 🗓️ **Date Filtering** - Only includes events from today onwards -->
 - ⚡ **Parallel Processing** - Fast concurrent processing of multiple events
-    - **Rate-Limited** - Built-in throttling prevents overwhelming the server
+  - **Rate-Limited** - Built-in throttling prevents overwhelming the server
 - 💾 **Smart Caching** - Avoids re-downloading unchanged events
 - 🌐 **HTTP Server** - Serves merged calendar for subscription
 - 🐳 **Docker Ready** - Easy deployment with Docker/Coolify
+- 🏗️ **CI/CD Pipeline** - Automated builds with GitHub Actions
+- 🌍 **Multi-Architecture** - Supports amd64 and arm64 platforms
 
 ## Use Case
 
@@ -71,22 +73,39 @@ CACHE_DURATION_HOURS = 6
 MAX_WORKERS = 5
 ```
 
+### Environment Variables
+
+You can override configuration via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `UPDATE_INTERVAL` | 3600 | Seconds between calendar updates |
+| `USE_NGINX` | false | Set to 'true' when using nginx sidecar |
+| `OUTPUT_DIR` | /app/output | Directory for generated files |
+| `EVENTS_URL` | (set in code) | Source events page URL |
+
+```yaml
+environment:
+  - EVENTS_URL=https://example.com/events
+  - UPDATE_INTERVAL=3600  # seconds between updates
+```
+
 ## How It Works
 
 1. **Scrapes Event Listings** - Fetches the main events page and extracts event URLs
-2. **Downloads ICS Files** - For each event, downloads the `.ics` file (tries `?format=ics` pattern)
+2. **Downloads ICS Files** - For each event, downloads the `.ics` file (tries `?format=ical` pattern)
 3. **Scrapes Descriptions** - Fetches each event page and extracts description text
-4. **Enriches Events** - Adds descriptions and URLs to calendar events
-5. **Filters by Date** - Removes events before today
-6. **Merges Calendar** - Combines all events into single `.ics` file
-7. **Caches Results** - Stores event data to avoid redundant downloads
+4. **Enriches Events** - Adds descriptions and URLs to calendar events<!-- 5. **Filters by Date** - Removes events before today -->
+5. **Merges Calendar** - Combines all events into single `.ics` file
+6. **Caches Results** - Stores event data to avoid redundant downloads
+7. **Serves Calendar** - Makes the merged calendar available via HTTP
 
 ## Subscribing to the Calendar
 
 ### In Google Calendar
 1. Click the **+** next to "Other calendars"
 2. Select **From URL**
-3. Enter: `http://your-server:8080/merged_calendar.ics`
+3. Enter: `http://your-server:8080/merged_calendar.ics` (or `/calendar.ics` if using nginx)
 4. Click **Add calendar**
 
 ### In Apple Calendar
@@ -122,17 +141,6 @@ https://calendar-events.yourdomain.com/merged_calendar.ics
 ```
 _Note: If using the `docker-compose.prod.yml` production-ready variant, then your URL will instead be `https://calendar-events.yourdomain.com/calendar.ics`_
 
-### Environment Variables
-
-You can override configuration via environment variables:
-
-```yaml
-environment:
-  - EVENTS_URL=https://example.com/events
-  - UPDATE_INTERVAL=3600  # seconds between updates
-  - MAX_WORKERS=5
-```
-
 ### Scheduled Updates
 
 The Docker container runs the aggregator in a loop:
@@ -145,10 +153,83 @@ while true; do
 done
 ```
 
-Adjust the sleep interval in `docker-compose.yml`:
+Adjust the sleep interval via `UPDATE_INTERVAL`:
 - `1800` = 30 minutes
 - `3600` = 1 hour (default)
 - `21600` = 6 hours
+
+## CI/CD Pipeline
+
+This project uses GitHub Actions for automated building, testing, and publishing of Docker images.
+
+### Available Image Tags
+
+Images are automatically built and pushed to GitHub Container Registry (ghcr.io):
+
+- `latest` - Latest main branch build
+- `main` - Main branch builds
+- `develop` - Develop branch builds  
+- `v1.0.0` - Specific version tags
+- `v1.0` - Minor version tags
+- `v1` - Major version tags
+- `main-abc1234` - Branch + commit SHA
+
+### Creating a Release
+
+To create a new release with semantic versioning:
+
+```bash
+# Tag your commit
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+
+# GitHub Actions will automatically:
+# 1. Run tests
+# 2. Build multi-arch images (amd64 + arm64)
+# 3. Push with version tags: v1.0.0, v1.0, v1, latest
+```
+
+### Multi-Architecture Support
+
+The CI/CD pipeline builds images for multiple architectures:
+- `linux/amd64` - x86_64 servers, most cloud providers
+- `linux/arm64` - ARM64 servers (AWS Graviton, Apple Silicon, Raspberry Pi 4/5)
+
+Pull and run on any supported platform:
+```bash
+docker pull ghcr.io/kaffolder7/ics-calendar-aggregator:latest
+# Docker automatically selects the correct architecture
+```
+
+### CI/CD Workflow Triggers
+
+The build pipeline is triggered on:
+- **Push to main/develop** - Builds and pushes with branch name tag
+- **Pull requests** - Builds but doesn't push (testing only)
+- **Tags (v*)** - Creates semantic version tags
+- **Manual trigger** - Via GitHub Actions UI
+
+## Monitoring
+
+### Check Service Health
+
+```bash
+# Check if calendar file exists
+docker exec calendar-aggregator test -f /app/output/merged_calendar.ics && echo "OK"
+
+# View logs
+docker logs -f calendar-aggregator
+
+# Check nginx health (if using nginx)
+curl http://localhost:8080/health
+```
+
+### Healthchecks
+
+Both `docker-compose.yml` configurations include healthchecks:
+- Aggregator: Verifies calendar file exists
+<!-- - Nginx: Checks server responds and file exists -->
+- Nginx: Checks that calendar file exists
 
 ## Customization
 
@@ -158,9 +239,9 @@ If the event page structure differs, update the selectors in `get_event_descript
 
 ```python
 selectors = [
-    '.eventlist-description',  # Primary selector
-    '.sqs-block-html',         # Squarespace content block
-    '.event-details',          # Alternative
+    '.eventitem-column-content',   # Primary selector
+    '.eventlist-description',      # Alternative
+    '.sqs-block-html',             # Squarespace content block
     # Add your own selectors here
 ]
 ```
@@ -198,9 +279,20 @@ MAX_WORKERS = 5   # Balanced (default)
 MAX_WORKERS = 10  # Aggressive (faster, may be rate-limited)
 ```
 
-<!-- By default, a maximum number of 5 workers are configured, but no more than the number of events. -->
-
 _Note: By default, the script uses up to 5 parallel workers, automatically reducing to match the number of events if fewer than 5. Setting `MAX_WORKERS` to a fixed number will force the script to always use that many workers, no matter the number of events._
+
+### Modify ICS URL Patterns
+
+Update the patterns tried in `download_ics()`:
+
+```python
+ics_urls = [
+    f"{event_url}?format=ical",
+    f"{event_url}?format=ics",
+    f"{event_url.rstrip('/')}.ics",
+    # Add patterns based on your site
+]
+```
 
 ## Troubleshooting
 
@@ -219,8 +311,8 @@ python aggregator.py
 Update the selectors:
 ```python
 selectors = [
+    '.eventlist-event--upcoming a.eventlist-title-link[href*="/events/"]',
     'a[href*="/events-calendar/"]',
-    'a[href*="/events/"]',
     # Add selectors based on your site's HTML
 ]
 ```
@@ -234,8 +326,8 @@ selectors = [
 ```python
 # Update URL patterns in download_ics()
 ics_urls = [
+    f"{event_url}?format=ical",
     f"{event_url}?format=ics",
-    f"{event_url}/?format=ics",
     f"{event_url}.ics",
     # Add patterns based on your site
 ]
@@ -248,9 +340,9 @@ ics_urls = [
 **Solution**: Clear the cache database:
 
 ```bash
-docker exec calendar-aggregator rm calendar_cache.db
+docker exec calendar-aggregator rm /app/output/calendar_cache.db
 # Or locally:
-rm calendar_cache.db
+rm output/calendar_cache.db
 ```
 
 ### Description Not Extracted
@@ -266,28 +358,62 @@ rm calendar_cache.db
 
 ### Rate Limiting
 
-**Problem**: Too many requests too quickly
+**Problem**: Too many requests too quickly (HTTP 429 errors)
 
-**Solution**: Reduce `MAX_WORKERS`:
+**Solution**: Reduce `MAX_WORKERS` or increase `min_delay`:
 
 ```python
 MAX_WORKERS = 3  # Slower but more respectful
+self.min_delay = 0.5  # 500ms between requests
 ```
 
-<!-- Or add rate limiting (see code comments in the script). -->
+### Container Won't Start
+
+**Problem**: Docker container fails to start
+
+**Solutions**:
+- Verify volume permissions: `chmod 755 output/`
+- Check port 8080 is not already in use: `netstat -tlnp | grep 8080`
+- Review container logs: `docker logs calendar-aggregator`
+
+### Calendar Not Updating
+
+**Problem**: Calendar file doesn't refresh
+
+**Solutions**:
+- Check logs: `docker logs -f calendar-aggregator`
+- Verify `UPDATE_INTERVAL` is set correctly
+- Ensure source website is accessible from container
+- Clear cache and restart: `docker-compose restart`
+
+### Image Pull Fails
+
+**Problem**: Cannot pull from GitHub Container Registry
+
+**Solutions**:
+- Ensure repository visibility is public, or authenticate:
+  ```bash
+  echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+  ```
+- Verify image name is correct: `ghcr.io/kaffolder7/ics-calendar-aggregator`
 
 ## File Structure
 
 ```
 ics-calendar-aggregator/
-├── aggregator.py           # Main Python script
-├── requirements.txt        # Python dependencies
-├── Dockerfile             # Docker image definition
-├── docker-compose.yml     # Docker Compose configuration
-├── nginx.conf             # Nginx config (optional)
-├── README.md              # This file
-├── merged_calendar.ics    # Generated calendar (created on first run)
-└── calendar_cache.db      # SQLite cache (created on first run)
+├── aggregator.py                         # Main Python script
+├── requirements.txt                      # Python dependencies
+├── Dockerfile                            # Docker image definition
+├── docker-compose.yml                    # Dev/simple Docker Compose config
+├── docker-compose.prod.yml               # Production Docker Compose config
+├── docker-entrypoint.sh                  # Container entrypoint script
+├── nginx.conf                            # Nginx config (for prod mode)
+├── test_aggregator.py                    # Unit tests
+├── .github/workflows/docker-build.yml    # CI/CD pipeline
+├── README.md                             # This file
+├── output/
+│   ├── merged_calendar.ics              # Generated calendar (created on first run)
+│   └── calendar_cache.db                # SQLite cache (created on first run)
 ```
 
 ## Requirements
@@ -316,9 +442,47 @@ ics-calendar-aggregator/
 - CPU: Low (mostly I/O bound)
 - Network: ~1-2MB per update cycle
 
+## Development
+
+### Running Tests
+
+```bash
+# Install test dependencies
+pip install pytest pytest-cov
+
+# Run tests
+pytest test_aggregator.py -v
+
+# Run with coverage
+pytest test_aggregator.py --cov=aggregator
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run aggregator once
+python aggregator.py
+
+# Start development server
+python -m http.server 8080 --directory output
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `pytest test_aggregator.py`
+5. Commit changes: `git commit -m 'Add amazing feature'`
+6. Push to branch: `git push origin feature/amazing-feature`
+7. Open a Pull Request
 
 ### Ideas for Contributions
 - Support for more event calendar platforms
@@ -326,10 +490,12 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - Web UI for configuration
 - Event deduplication improvements
 - More filtering options (categories, locations, etc.)
+- Enhanced error handling and retry logic
+- Prometheus metrics endpoint
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE) file for details
 
 ## Acknowledgments
 
@@ -344,9 +510,14 @@ If you encounter issues:
    - Error message
    - Website URL you're scraping
    - Relevant log output
+   - Docker/Python version
 
 ## Roadmap
 
+- [x] Multi-threaded parallel processing
+- [x] Rate limiting to prevent server overload
+- [x] CI/CD pipeline with GitHub Actions
+- [x] Multi-architecture Docker images
 - [ ] Web UI for configuration
 - [ ] Support for recurring events
 - [ ] Email notifications for new events
@@ -354,6 +525,7 @@ If you encounter issues:
 - [ ] Event category/tag filtering
 - [ ] CalDAV server integration
 - [ ] Prometheus metrics endpoint
+- [ ] Helm chart for Kubernetes deployment
 
 ---
 
