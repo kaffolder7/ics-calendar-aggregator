@@ -10,8 +10,6 @@ services:
     environment:
       - EVENTS_URL=https://www.noblesvillemainstreet.org/events
       - UPDATE_INTERVAL=3600  # 1 hour in seconds
-      # - UPDATE_INTERVAL=1800  # 30 minutes in seconds
-      # - UPDATE_INTERVAL=21600  # 6 hours in seconds
       # - OUTPUT_DIR=/app/output
     healthcheck:
       test: ["CMD-SHELL", "test -f /app/output/merged_calendar.ics || exit 1"]
