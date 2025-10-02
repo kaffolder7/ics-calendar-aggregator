@@ -1,0 +1,5 @@
+.gitignore
+.repomixignore
+aggregator_threaded.py
+aggregator.py
+repomix.config.json
