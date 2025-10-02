@@ -15,6 +15,7 @@ env.bak/
 venv.bak/
 
 .DS_Store
+*.backup*
 
 # Repomix
 repomix-output.*
