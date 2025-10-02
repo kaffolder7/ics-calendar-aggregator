@@ -140,6 +140,21 @@ class CalendarAggregator:
             if not description_text:
                 print(f"  ⚠ No description found on page")
             
+            # Limit to first 500 characters
+            # if description_text and len(description_text) > 500:
+            #     description_text = description_text[:497] + "..."
+
+            # Get event image
+            # img = soup.select_one('.event-image img')
+            # if img:
+            #     img_url = img.get('src')
+            #     description_text += f"\n\nImage: {img_url}"
+
+            # Get ticket link
+            # ticket_link = soup.select_one('a[href*="ticket"]')
+            # if ticket_link:
+            #     description_text += f"\n\nTickets: {ticket_link.get('href')}"
+            
             return description_text
             
         except Exception as e:
@@ -153,6 +168,8 @@ class CalendarAggregator:
             f"{event_url}?format=ics",
             f"{event_url}?format=ical",
             f"{event_url.rstrip('/')}.ics",
+            # event_url.replace('/events/', '/events/').rstrip('/') + '?format=ics',
+            # event_url.replace('/events/', '/events/').rstrip('/') + '?format=ical',
         ]
         
         for ics_url in ics_urls:
@@ -208,39 +225,6 @@ class CalendarAggregator:
             return True
         
         return False
-    
-    def is_future_event(self, event):
-        """Check if event starts today or in the future"""
-        try:
-            dtstart = event.get('dtstart')
-            if not dtstart:
-                return True  # Include events without dates (rare case)
-            
-            # Get the datetime value
-            event_date = dtstart.dt
-            
-            # Handle both date and datetime objects
-            if isinstance(event_date, datetime):
-                event_datetime = event_date
-            else:
-                # It's a date object, convert to datetime at start of day
-                event_datetime = datetime.combine(event_date, datetime.min.time())
-            
-            # Make timezone-aware if needed
-            if event_datetime.tzinfo is None:
-                event_datetime = event_datetime.replace(tzinfo=None)
-            
-            # Get today at midnight (start of day)
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            # Compare - include if event is today or later
-            return event_datetime >= today
-        
-
-            
-        except Exception as e:
-            print(f"    Warning: Could not parse date for event, including it anyway: {e}")
-            return True  # Include by default if we can't determine the date
     
     def process_single_event(self, event_url):
         """Process a single event: scrape description, download ICS, parse, and return event data"""
