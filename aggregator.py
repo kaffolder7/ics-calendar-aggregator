@@ -15,8 +15,17 @@ import hashlib
 
 # Configuration
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
-OUTPUT_ICS = "merged_calendar.ics"
-DB_FILE = "calendar_cache.db"
+
+# Use different default paths for local vs Docker environments
+if os.path.exists('/app'):
+    # Running in Docker
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
+else:
+    # Running locally
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
+
+OUTPUT_ICS = os.path.join(OUTPUT_DIR, "merged_calendar.ics")
+DB_FILE = os.path.join(OUTPUT_DIR, "calendar_cache.db")
 CACHE_DURATION_HOURS = 6
 
 class CalendarAggregator:
@@ -25,11 +34,15 @@ class CalendarAggregator:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (compatible; CalendarAggregator/1.0)'
         })
+
+        # Ensure output directory exists with proper permissions
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
         self.init_database()
     
     def init_database(self):
         """Initialize SQLite database for tracking processed events"""
-        self.conn = sqlite3.connect(DB_FILE)
+        self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS events (

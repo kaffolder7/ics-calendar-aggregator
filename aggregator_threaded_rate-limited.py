@@ -18,8 +18,17 @@ from threading import Lock
 
 # Configuration
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
-OUTPUT_ICS = "merged_calendar.ics"
-DB_FILE = "calendar_cache.db"
+
+# Use different default paths for local vs Docker environments
+if os.path.exists('/app'):
+    # Running in Docker
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/app/output")
+else:
+    # Running locally
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
+
+OUTPUT_ICS = os.path.join(OUTPUT_DIR, "merged_calendar.ics")
+DB_FILE = os.path.join(OUTPUT_DIR, "calendar_cache.db")
 CACHE_DURATION_HOURS = 6
 # MAX_WORKERS = 5  # Number of parallel requests
 # MAX_WORKERS = 3  # Fewer concurrent requests (avoid rate-limiting)
@@ -31,6 +40,10 @@ class CalendarAggregator:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (compatible; CalendarAggregator/1.0)'
         })
+
+        # Ensure output directory exists with proper permissions
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
         self.init_database()
         self.request_lock = Lock()
         self.last_request_time = 0
@@ -38,7 +51,7 @@ class CalendarAggregator:
     
     def init_database(self):
         """Initialize SQLite database for tracking processed events"""
-        self.conn = sqlite3.connect(DB_FILE)
+        self.conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS events (
@@ -326,18 +339,19 @@ class CalendarAggregator:
                         merged_cal.add_component(event)
                         events_added += 1
                         
-                        # Update database (thread-safe with SQLite's default settings)
-                        self.cursor.execute('''
-                            INSERT OR REPLACE INTO events (uid, url, last_updated, ics_hash)
-                            VALUES (?, ?, ?, ?)
-                        ''', (uid, event_url, datetime.now().isoformat(), ics_hash))
+                        # Use connection lock for thread safety
+                        with self.request_lock:
+                            # Update database (thread-safe with SQLite's default settings)
+                            self.cursor.execute('''
+                                INSERT OR REPLACE INTO events (uid, url, last_updated, ics_hash)
+                                VALUES (?, ?, ?, ?)
+                            ''', (uid, event_url, datetime.now().isoformat(), ics_hash))
+                            self.conn.commit()
                         
                         print(f"[Main] ✓ Added: {event.get('summary', 'Untitled')}")
                 
                 except Exception as e:
                     print(f"[Main] ✗ Error processing result for {event_url}: {e}")
-        
-        self.conn.commit()
         
         # Write merged calendar
         with open(OUTPUT_ICS, 'wb') as f:
