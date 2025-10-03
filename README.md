@@ -39,7 +39,25 @@ docker-compose up -d
 # http://localhost:8080/merged_calendar.ics
 ```
 
-### Option 2: Python Direct
+### Option 2: Pre-built Image from GitHub Container Registry
+
+```bash
+# Pull latest version
+docker pull ghcr.io/kaffolder7/ics-calendar-aggregator:latest
+
+# Run with simple Python HTTP server
+docker run -d \
+  --name calendar-aggregator \
+  -p 8080:8080 \
+  -v $(pwd)/output:/app/output \
+  -e UPDATE_INTERVAL=3600 \
+  ghcr.io/kaffolder7/ics-calendar-aggregator:latest
+
+# Calendar available at:
+# http://localhost:8080/merged_calendar.ics
+```
+
+### Option 3: Python Direct
 
 ```bash
 # Install dependencies
@@ -128,10 +146,67 @@ environment:
 
 ## Deployment
 
+### Deploy with Pre-built Images
+
+The easiest way to deploy is using pre-built images from GitHub Container Registry:
+
+**Simple mode (Python HTTP server):**
+```bash
+docker run -d \
+  --name calendar-aggregator \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v $(pwd)/output:/app/output \
+  -e UPDATE_INTERVAL=3600 \
+  ghcr.io/kaffolder7/ics-calendar-aggregator:latest
+```
+
+**Production mode (with nginx sidecar):**
+
+<!-- ```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  aggregator:
+    image: ghcr.io/kaffolder7/ics-calendar-aggregator:latest
+    restart: unless-stopped
+    volumes:
+      - calendar-data:/app/output
+    environment:
+      - UPDATE_INTERVAL=3600
+      - USE_NGINX=true
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/output/merged_calendar.ics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - calendar-data:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - aggregator
+
+volumes:
+  calendar-data:
+```
+
+Run it:
+```bash
+docker-compose up -d
+``` -->
+
+Please reference the included [`docker-compose.prod.yml`](docker-compose.prod.yml) file in this repo and then run it with `docker-compose up -d`
+
 ### Deploy to Coolify
 
 1. Create a new **Docker Compose** service in Coolify
-2. Paste the contents of `docker-compose.yml` (or `docker-compose.prod.yml` for a production-ready version)
+2. Paste the contents of [`docker-compose.yml`](docker-compose.yml) _(or [`docker-compose.prod.yml`](docker-compose.prod.yml)—for a production-ready version)_
 3. Add your domain (optional): `calendar-events.yourdomain.com`
 4. Click **Deploy**
 
@@ -149,7 +224,7 @@ The Docker container runs the aggregator in a loop:
 # Updates every hour by default
 while true; do 
   python aggregator.py 
-  sleep 3600
+  sleep "${UPDATE_INTERVAL:-3600}"
 done
 ```
 
@@ -157,6 +232,74 @@ Adjust the sleep interval via `UPDATE_INTERVAL`:
 - `1800` = 30 minutes
 - `3600` = 1 hour (default)
 - `21600` = 6 hours
+
+### "Run Once" Mode
+
+If for some reason you would like to only run the aggregator once (not in a loop) for manual testing & debugging, CI/CD integration tests, cron jobs / scheduled tasks, etc., then set the `RUN_ONCE` environment variable to `true`:
+```bash
+RUN_ONCE=true
+```
+
+### "Run Once" Mode
+
+#### 1. **Manual Testing & Debugging** 
+When you want to run the aggregator once locally to test changes without waiting for the full loop:
+```bash
+docker run --rm -e RUN_ONCE=true -v $(pwd)/output:/app/output noblesville-calendar-aggregator
+```
+
+<!-- #### 2. CI/CD Integration Tests
+For more thorough testing in your GitHub Actions that actually runs the aggregator:
+```yaml
+- name: Test full aggregation
+  run: |
+    docker build -t test-build .
+    docker run --rm -e RUN_ONCE=true -v $(pwd)/test-output:/app/output test-build
+    # Verify the output file was created
+    test -f test-output/merged_calendar.ics
+    # Maybe even validate the ICS format
+    grep "BEGIN:VCALENDAR" test-output/merged_calendar.ics
+``` -->
+
+#### 2. Cron Jobs / Scheduled Tasks
+If you want to use external scheduling instead of the built-in loop:
+```bash
+# In a crontab
+0 * * * * docker run --rm -e RUN_ONCE=true -v /path/to/output:/app/output my-calendar-aggregator
+```
+This gives you more control over scheduling and makes it easier to monitor job completion.
+
+#### 3. Kubernetes CronJobs
+Similar to cron, but in Kubernetes:
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calendar-aggregator
+spec:
+  schedule: "0 * * * *"  # Every hour
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: aggregator
+            image: ghcr.io/yourusername/calendar-aggregator:latest
+            env:
+            - name: RUN_ONCE
+              value: "true"
+          restartPolicy: OnFailure
+```
+
+#### 4. Development Workflow
+When developing locally and you want quick feedback:
+```bash
+# Make code changes
+# Run once to test
+docker-compose run -e RUN_ONCE=true aggregator
+# Check results
+# Repeat
+```
 
 ## CI/CD Pipeline
 
@@ -203,10 +346,10 @@ docker pull ghcr.io/kaffolder7/ics-calendar-aggregator:latest
 
 ### CI/CD Workflow Triggers
 
-The build pipeline is triggered on:
-- **Push to main/develop** - Builds and pushes with branch name tag
-- **Pull requests** - Builds but doesn't push (testing only)
-- **Tags (v*)** - Creates semantic version tags
+The build pipeline is triggered on:<!-- - **Push to main/develop** - Builds and pushes with branch name tag -->
+- **Releases** - Builds and pushes with associated semantic tag
+- **Pull requests** - Builds but doesn't push (testing only)<!-- - **Tags (v*)** - Creates semantic version tags -->
+- **Tags _(v\*)_** - Creates semantic version tags (builds but doesn't push)
 - **Manual trigger** - Via GitHub Actions UI
 
 ## Monitoring
@@ -227,8 +370,7 @@ curl http://localhost:8080/health
 ### Healthchecks
 
 Both `docker-compose.yml` configurations include healthchecks:
-- Aggregator: Verifies calendar file exists
-<!-- - Nginx: Checks server responds and file exists -->
+- Aggregator: Verifies calendar file exists<!-- - Nginx: Checks server responds and file exists -->
 - Nginx: Checks that calendar file exists
 
 ## Customization

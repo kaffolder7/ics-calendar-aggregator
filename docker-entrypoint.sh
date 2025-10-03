@@ -16,7 +16,7 @@ while true; do
     echo "Running calendar aggregator..."
     python aggregator.py
     echo "Waiting $UPDATE_INTERVAL seconds before next run..."
-    sleep $UPDATE_INTERVAL
+    sleep "${UPDATE_INTERVAL:-3600}"
 done &
 
 # Only start Python HTTP server if not using nginx
