@@ -44,10 +44,14 @@ jobs:
           # Check imports
           python -c "import requests; import bs4; import icalendar; print('Dependencies OK')"
 
-      - name: Test Docker build
+      - name: Test Docker build + full aggregation
         run: |
           docker build -t test-build .
-          docker run --rm --entrypoint python test-build -c "import aggregator; print('Container OK')"
+          docker run --rm -e RUN_ONCE=true -v $(pwd)/test-output:/app/output test-build
+          # Verify the output file was created
+          test -f test-output/merged_calendar.ics
+          # Validate the ICS format
+          grep "BEGIN:VCALENDAR" test-output/merged_calendar.ics
 
   build-and-push:
     name: Build and Push Docker Image

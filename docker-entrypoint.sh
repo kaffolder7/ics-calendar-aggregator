@@ -4,6 +4,13 @@
 mkdir -p /app/output
 chmod 755 /app/output
 
+# Check if we should run once or loop
+if [ "$RUN_ONCE" = "true" ]; then
+    echo "Running calendar aggregator once..."
+    python aggregator.py
+    exit 0
+fi
+
 # Run aggregator in a loop
 while true; do 
     echo "Running calendar aggregator..."
