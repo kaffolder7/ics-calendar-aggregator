@@ -240,26 +240,13 @@ If for some reason you would like to only run the aggregator once (not in a loop
 RUN_ONCE=true
 ```
 
-### "Run Once" Mode
+<!-- ### "Run Once" Mode
 
 #### 1. **Manual Testing & Debugging** 
 When you want to run the aggregator once locally to test changes without waiting for the full loop:
 ```bash
 docker run --rm -e RUN_ONCE=true -v $(pwd)/output:/app/output noblesville-calendar-aggregator
 ```
-
-<!-- #### 2. CI/CD Integration Tests
-For more thorough testing in your GitHub Actions that actually runs the aggregator:
-```yaml
-- name: Test full aggregation
-  run: |
-    docker build -t test-build .
-    docker run --rm -e RUN_ONCE=true -v $(pwd)/test-output:/app/output test-build
-    # Verify the output file was created
-    test -f test-output/merged_calendar.ics
-    # Maybe even validate the ICS format
-    grep "BEGIN:VCALENDAR" test-output/merged_calendar.ics
-``` -->
 
 #### 2. Cron Jobs / Scheduled Tasks
 If you want to use external scheduling instead of the built-in loop:
@@ -299,7 +286,7 @@ When developing locally and you want quick feedback:
 docker-compose run -e RUN_ONCE=true aggregator
 # Check results
 # Repeat
-```
+``` -->
 
 ## CI/CD Pipeline
 
