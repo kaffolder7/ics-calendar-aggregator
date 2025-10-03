@@ -47,7 +47,7 @@ jobs:
       - name: Test Docker build
         run: |
           docker build -t test-build .
-          docker run --rm test-build python -c "import aggregator; print('Container OK')"
+          docker run --rm --entrypoint python test-build -c "import aggregator; print('Container OK')"
 
   build-and-push:
     name: Build and Push Docker Image
