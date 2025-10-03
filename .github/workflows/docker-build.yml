@@ -4,8 +4,8 @@ on:
   push:
     tags:
       - 'v*.*.*'
-    release:
-      types: [published]
+  release:
+    types: [published]
   pull_request:
     branches:
       - main
@@ -70,6 +70,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
+        if: github.event_name == 'release'  # Only login when we'll actually push
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -82,12 +83,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
