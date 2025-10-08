@@ -1,6 +1,20 @@
 # ICS Calendar Aggregator
 
-A Python service that scrapes event pages, downloads individual `.ics` calendar files, enriches them with event descriptions, and merges them into a single subscribable calendar feed.
+> **⚠️ This repository is archived and no longer maintained.**
+> 
+> **→ Active development has moved to the serverless version: [ics-calendar-aggregator-lambda](https://github.com/kaffolder7/ics-calendar-aggregator-lambda)**
+>
+> The serverless version offers:
+> - 98% cost reduction (~$2.40/year vs ~$120/year)
+> - Zero server maintenance
+> - Auto-scaling and built-in CDN
+> - Same functionality as this Docker version
+>
+> This repository remains available for reference but will not receive updates.
+
+---
+
+A Docker-based calendar aggregator that scrapes event pages, downloads individual `.ics` calendar files, enriches them with event descriptions, and merges them into a single subscribable calendar feed.
 
 ## Features
 
