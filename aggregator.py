@@ -15,6 +15,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from threading import Lock
+import html
 
 # Configuration
 EVENTS_URL = "https://www.noblesvillemainstreet.org/events"
@@ -251,6 +252,10 @@ class CalendarAggregator:
             for event in events:
                 uid = str(event.get('uid', ''))
 
+                # Convert HTML entities into their corresponding characters
+                summary_value = event.get('summary')
+                if summary_value:
+                    event['summary'] = html.unescape(summary_value)
                 # Set the event page URL as the VEVENT URL property
                 if event_url:
                     event['url'] = event_url
